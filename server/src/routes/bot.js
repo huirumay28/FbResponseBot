@@ -89,17 +89,17 @@ const parseResponseGuide = (filePath) => {
 
 // Scrape Facebook post comments
 const scrapeFacebookComments = async (postUrls) => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-  
-  const page = await browser.newPage();
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-  
-  const allComments = [];
-  
+  let browser = null;
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    
+    const allComments = [];
     for (const url of postUrls) {
       try {
         console.log(`正在爬取: ${url}`);
@@ -151,16 +151,26 @@ const scrapeFacebookComments = async (postUrls) => {
         });
       }
     }
+    
+    return allComments;
+  } catch (error) {
+    console.error('Facebook scraping error:', error);
+    throw error;
   } finally {
-    await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Failed to close browser:', closeError);
+      }
+    }
   }
-  
-  return allComments;
 };
 
 // Classify comment based on content analysis
 const classifyComment = (commentText) => {
-  const text = commentText.toLowerCase();
+  // Don't use toLowerCase() for Chinese text - it doesn't work properly
+  const text = commentText;
   
   // Category detection patterns
   const patterns = {
@@ -275,15 +285,17 @@ const generateResponses = (comments, responseGuide) => {
 
 // Upload and parse response guide
 router.post('/upload-guide', upload.single('responseGuide'), (req, res) => {
+  let filePath = null;
   try {
     if (!req.file) {
       return res.status(400).json({ error: '請上傳Excel文件' });
     }
     
-    const responseGuide = parseResponseGuide(req.file.path);
+    filePath = req.file.path;
+    const responseGuide = parseResponseGuide(filePath);
     
     // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
+    fs.unlinkSync(filePath);
     
     res.json({
       success: true,
@@ -291,6 +303,14 @@ router.post('/upload-guide', upload.single('responseGuide'), (req, res) => {
       data: responseGuide
     });
   } catch (error) {
+    // Clean up file even if error occurs
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (cleanupError) {
+        console.error('Failed to cleanup file:', cleanupError);
+      }
+    }
     res.status(400).json({ error: error.message });
   }
 });
@@ -348,6 +368,17 @@ router.post('/process-posts', async (req, res) => {
 // Download generated Excel file
 router.get('/download/:fileName', (req, res) => {
   const fileName = req.params.fileName;
+  
+  // Security: Prevent path traversal attacks
+  if (fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
+    return res.status(400).json({ error: '無效的文件名稱' });
+  }
+  
+  // Security: Only allow Excel files
+  if (!fileName.match(/^facebook-responses-\d+\.xlsx$/)) {
+    return res.status(400).json({ error: '無效的文件名稱格式' });
+  }
+  
   const filePath = path.join(__dirname, '../../output', fileName);
   
   if (!fs.existsSync(filePath)) {

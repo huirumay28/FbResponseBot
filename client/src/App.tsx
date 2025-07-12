@@ -19,8 +19,17 @@ function App() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.includes('spreadsheet') && !file.type.includes('excel')) {
-      alert('請上傳Excel文件 (.xlsx)');
+    // Check file extension and MIME type more accurately
+    const allowedTypes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/excel'
+    ];
+    const allowedExtensions = ['.xlsx', '.xls'];
+    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    
+    if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
+      alert('請上傳Excel文件 (.xlsx 或 .xls)');
       return;
     }
 
